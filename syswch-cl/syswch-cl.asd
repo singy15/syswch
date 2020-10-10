@@ -5,8 +5,8 @@
   :depends-on (
     "alexandria"
     "cl-ppcre"
-    "hunchentoot"
-    "easy-routes"
+    "bordeaux-threads"
+    "usocket"
   )
   :components ((:module "src"
                 :components (

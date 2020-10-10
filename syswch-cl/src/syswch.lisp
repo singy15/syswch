@@ -1,14 +1,13 @@
 (defpackage syswch
   (:use
-    cl
-    easy-routes)
+    cl)
   (:export
     start-server))
 (in-package :syswch)
 
 ;;; Variables
 (defparameter *watch-interval* 0.5)
-(defparameter *watch-filename* "wepl.lisp")
+(defparameter *watch-filename* "i.lisp")
 (defparameter *watch-system* nil)
 (defparameter *wepl-signal* :stopped)
 (defparameter *syswch-server* nil)
@@ -82,35 +81,50 @@
         ;; Flush *standard-output*
         (finish-output *standard-output*))))
 
-;;; Start syswch server
+;;; Start server
 (defun start-server (port)
-  (setf *syswch-server* 
-        (make-instance 'easy-routes:easy-routes-acceptor :port port))
+  (let* ((socket (usocket:socket-listen "127.0.0.1" port))
+         (thread nil)
+         (stdout *standard-output*))
 
-  (hunchentoot:start *syswch-server*)
+    (format stdout "Starting syswch server on port=~a...~%" port)
 
-  (let ((syswch-cl-dir (asdf:system-relative-pathname :syswch-cl "../syswch-cs/"))
-        (dir (sb-posix:getcwd)))
-    (sb-posix:chdir syswch-cl-dir)
-    (setf *syswch-watcher* (sb-ext:run-program 
-        "C:\\Program Files\\dotnet\\dotnet.exe" 
-        (list "run" (ppcre:regex-replace-all "/" (namestring dir) "\\") (write-to-string port)) 
-        :output t :input *standard-input* :wait nil))
-    (sb-posix:chdir dir))
+    ;; Start thread
+    (setf thread 
+          (bordeaux-threads:make-thread 
+            (lambda ()
+              (let ((*standard-output* stdout)
+                    (connection (usocket:socket-accept socket :element-type 'character)))
+                (loop
+                  (usocket:wait-for-input connection)
+                  (let ((msg (read-line (usocket:socket-stream connection))))
+                    (format *standard-output* "RELOAD: ~a~%" msg)
+                    (block reload-source
+                      (handler-bind
+                        ((error #'(lambda (cond)
+                                    (format *standard-output* "ERROR: ~a" cond)
+                                    (return-from reload-source))))
+                        (cond 
+                          ((equal "i.lisp" (file-namestring msg)) nil)
+                          ((equal "lisp" (pathname-type msg)) (load msg))
+                          ((equal "asd" (pathname-type msg)) nil)
+                          (t nil))))))))))
 
-  (wepl-start))
+    ;; Launch filesystem watcher
+    (let ((syswch-cl-dir (asdf:system-relative-pathname :syswch-cl "../syswch-cs/"))
+          (dir (sb-posix:getcwd)))
+      (sb-posix:chdir syswch-cl-dir)
+      (setf *syswch-watcher* (sb-ext:run-program 
+          "C:\\Program Files\\dotnet\\dotnet.exe" 
+           (list "run" (ppcre:regex-replace-all "/" (namestring dir)  "\\") (write-to-string port)) 
+          :output t 
+          ; :input *standard-input* 
+          :wait nil))
+      (sb-posix:chdir dir))
 
-;;; Define GET /reload
-(defroute get-reload ("/reload" :method :get) (file)
-  (hunchentoot:log-message* :INFO "reloaded ~a" file)
+    ;; Start wepl
+    (bordeaux-threads:make-thread #'wepl-start)))
 
-  (cond 
-    ((equal "wepl.lisp" (file-namestring file)) nil)
-    ((equal "lisp" (pathname-type file)) (load file))
-    ((equal "asd" (pathname-type file)) nil))
-
-  ; (load file) 
-  (format nil "reload ~a" file))
 
 (in-package :cl-user)
 
