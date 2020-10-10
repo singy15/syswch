@@ -1,19 +1,18 @@
 (defpackage syswch
   (:use
-    cl)
+    cl
+    easy-routes)
   (:export
-    wepl-start
-    wepl-stop))
+    start-server))
 (in-package :syswch)
-
-;;; Load libraries
-(ql:quickload :alexandria :silent t)
 
 ;;; Variables
 (defparameter *watch-interval* 0.5)
 (defparameter *watch-filename* "wepl.lisp")
 (defparameter *watch-system* nil)
 (defparameter *wepl-signal* :stopped)
+(defparameter *syswch-server* nil)
+(defparameter *syswch-watcher* nil)
 
 ;;; Read file
 (defun slurp (path)
@@ -76,15 +75,42 @@
               ((error #'(lambda (cond)
                           (format *standard-output* "ERROR: ~a" cond) 
                           (return-from eval-source))))
-              (format *standard-output* "~%~a~%" (eval (car (reverse (read-source)))))
+              (format *standard-output* "~%~a~%" 
+                      (eval (car (reverse (read-source)))))
               (finish-output *standard-output*))))
 
         ;; Flush *standard-output*
         (finish-output *standard-output*))))
 
-(in-package :cl-user)
+;;; Start syswch server
+(defun start-server (port)
+  (setf *syswch-server* 
+        (make-instance 'easy-routes:easy-routes-acceptor :port port))
 
-;; Execute
-(syswch:wepl-start)
-(cl-user::exit)
+  (hunchentoot:start *syswch-server*)
+
+  (let ((syswch-cl-dir (asdf:system-relative-pathname :syswch-cl "../syswch-cs/"))
+        (dir (sb-posix:getcwd)))
+    (sb-posix:chdir syswch-cl-dir)
+    (setf *syswch-watcher* (sb-ext:run-program 
+        "C:\\Program Files\\dotnet\\dotnet.exe" 
+        (list "run" (ppcre:regex-replace-all "/" (namestring dir) "\\") (write-to-string port)) 
+        :output t :input *standard-input* :wait nil))
+    (sb-posix:chdir dir))
+
+  (wepl-start))
+
+;;; Define GET /reload
+(defroute get-reload ("/reload" :method :get) (file)
+  (hunchentoot:log-message* :INFO "reloaded ~a" file)
+
+  (cond 
+    ((equal "wepl.lisp" (file-namestring file)) nil)
+    ((equal "lisp" (pathname-type file)) (load file))
+    ((equal "asd" (pathname-type file)) nil))
+
+  ; (load file) 
+  (format nil "reload ~a" file))
+
+(in-package :cl-user)
 

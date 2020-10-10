@@ -1,11 +1,16 @@
 (defsystem "syswch-cl"
   :version "0.1.0"
-  :author ""
-  :license ""
-  :depends-on ()
+  :author "kedama"
+  :license "MIT"
+  :depends-on (
+    "alexandria"
+    "cl-ppcre"
+    "hunchentoot"
+    "easy-routes"
+  )
   :components ((:module "src"
-                :components
-                ((:file "main"))))
+                :components (
+                  (:file "syswch"))))
   :description ""
   :in-order-to ((test-op (test-op "syswch-cl/tests"))))
 
